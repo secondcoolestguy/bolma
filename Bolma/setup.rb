@@ -22,7 +22,7 @@ def run_with_progress(label, cmd)
   end
 end
 
-run_with_progress("Bolma (Init)", "cargo new --quiet Bolma")
+FileUtils.mkdir_p("Bolma/src")
 
 Dir.chdir("Bolma") do
   cargo_toml_content = <<~'TOML'
@@ -126,7 +126,6 @@ Dir.chdir("Bolma") do
         fn resolve_color(color_name: &str) -> String {
             let clean = color_name.trim_matches('"').to_lowercase();
             match clean.as_str() {
-                // Swift Standard Palette
                 "red" => "#FF3B30".to_string(),
                 "orange" => "#FF9500".to_string(),
                 "yellow" => "#FFCC00".to_string(),
@@ -143,7 +142,6 @@ Dir.chdir("Bolma") do
                 "black" => "#000000".to_string(),
                 "gray" | "grey" => "#8E8E93".to_string(),
                 "clear" => "transparent".to_string(),
-                // Swift System Grays
                 "systemgray2" => "#AEAEC2".to_string(),
                 "systemgray3" => "#C7C7CC".to_string(),
                 "systemgray4" => "#D1D1D6".to_string(),
@@ -163,10 +161,8 @@ Dir.chdir("Bolma") do
             let norm = self.name.to_lowercase();
             let mut style = String::new();
 
-            // Minimum 1px separation from surrounding sibling elements
             style.push_str("margin: 1px; ");
 
-            // Margin support
             if let Some(m) = self.props.get("margin") {
                 let parts: Vec<&str> = m.trim_matches('"').split_whitespace().collect();
                 if parts.len() == 1 {
@@ -176,7 +172,6 @@ Dir.chdir("Bolma") do
                 }
             }
 
-            // Flexbox layout properties
             if let Some(justify) = self.props.get("justify") {
                 style.push_str(&format!("justify-content: {}; ", justify.trim_matches('"')));
             }
@@ -187,7 +182,6 @@ Dir.chdir("Bolma") do
                 style.push_str(&format!("gap: {}px; ", gap.trim_matches('"')));
             }
 
-            // Positioning
             if let Some(pos) = self.props.get("position") {
                 let parts: Vec<&str> = pos.trim_matches('"').split_whitespace().collect();
                 if !parts.is_empty() {
@@ -199,7 +193,6 @@ Dir.chdir("Bolma") do
                 }
             }
 
-            // Sizing
             if let Some(size) = self.props.get("size") {
                 let parts: Vec<&str> = size.trim_matches('"').split_whitespace().collect();
                 if parts.len() >= 2 {
@@ -213,7 +206,6 @@ Dir.chdir("Bolma") do
                 }
             }
 
-            // Stroke (Borders)
             if let Some(stroke_color) = self.props.get("stroke") {
                 let color = Self::resolve_color(stroke_color);
                 let width = self
@@ -224,7 +216,6 @@ Dir.chdir("Bolma") do
                 style.push_str(&format!("border: {}px solid {}; ", width, color));
             }
 
-            // Colors: 'color' is strictly for text; 'background' / 'bg' is for container backgrounds
             if let Some(text_color) = self.props.get("color") {
                 let color = Self::resolve_color(text_color);
                 style.push_str(&format!("color: {}; ", color));
@@ -424,6 +415,8 @@ Dir.chdir("Bolma") do
 
   File.write("layout.bolma", layout_bolma_content)
 
-  run_with_progress("Bolma v0.1.0 release", "cargo build --release")
-  FileUtils.cp("target/release/bolma", "./Bolma")
+  unless ENV["HOMEBREW_BREW_FILE"]
+    run_with_progress("Bolma v0.1.0 release", "cargo build --release")
+    FileUtils.cp("target/release/bolma", "./Bolma") rescue nil
+  end
 end
