@@ -123,21 +123,85 @@ Dir.chdir("Bolma") do
     }
 
     impl Element {
+        fn resolve_color(color_name: &str) -> String {
+            let clean = color_name.trim_matches('"').to_lowercase();
+            match clean.as_str() {
+                // Swift Standard Palette
+                "red" => "#FF3B30".to_string(),
+                "orange" => "#FF9500".to_string(),
+                "yellow" => "#FFCC00".to_string(),
+                "green" => "#34C759".to_string(),
+                "mint" => "#00C7BE".to_string(),
+                "teal" => "#30B0C7".to_string(),
+                "cyan" => "#32ADE6".to_string(),
+                "blue" => "#007AFF".to_string(),
+                "indigo" => "#5856D6".to_string(),
+                "purple" => "#AF52DE".to_string(),
+                "pink" => "#FF2D55".to_string(),
+                "brown" => "#A2845E".to_string(),
+                "white" => "#FFFFFF".to_string(),
+                "black" => "#000000".to_string(),
+                "gray" | "grey" => "#8E8E93".to_string(),
+                "clear" => "transparent".to_string(),
+                // Swift System Grays
+                "systemgray2" => "#AEAEC2".to_string(),
+                "systemgray3" => "#C7C7CC".to_string(),
+                "systemgray4" => "#D1D1D6".to_string(),
+                "systemgray5" => "#E5E5EA".to_string(),
+                "systemgray6" => "#F2F2F7".to_string(),
+                other => {
+                    if other.starts_with('#') {
+                        other.to_string()
+                    } else {
+                        format!("#{}", other)
+                    }
+                }
+            }
+        }
+
         fn to_html(&self) -> String {
             let norm = self.name.to_lowercase();
             let mut style = String::new();
 
+            // Minimum 1px separation from surrounding sibling elements
+            style.push_str("margin: 1px; ");
+
+            // Margin support
+            if let Some(m) = self.props.get("margin") {
+                let parts: Vec<&str> = m.trim_matches('"').split_whitespace().collect();
+                if parts.len() == 1 {
+                    style.push_str(&format!("margin: {}px; ", parts[0]));
+                } else if parts.len() >= 2 {
+                    style.push_str(&format!("margin: {}px {}px; ", parts[0], parts[1]));
+                }
+            }
+
+            // Flexbox layout properties
+            if let Some(justify) = self.props.get("justify") {
+                style.push_str(&format!("justify-content: {}; ", justify.trim_matches('"')));
+            }
+            if let Some(align) = self.props.get("align") {
+                style.push_str(&format!("align-items: {}; ", align.trim_matches('"')));
+            }
+            if let Some(gap) = self.props.get("gap") {
+                style.push_str(&format!("gap: {}px; ", gap.trim_matches('"')));
+            }
+
+            // Positioning
             if let Some(pos) = self.props.get("position") {
-                let parts: Vec<&str> = pos.split_whitespace().collect();
-                if parts.len() >= 2 {
+                let parts: Vec<&str> = pos.trim_matches('"').split_whitespace().collect();
+                if !parts.is_empty() {
                     let left = parts[0].parse::<f64>().unwrap_or(0.0) * 100.0;
-                    let top = parts[1].parse::<f64>().unwrap_or(0.0) * 100.0;
+                    let top = parts.get(1)
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(left / 100.0) * 100.0;
                     style.push_str(&format!("position: absolute; left: {}%; top: {}%; ", left, top));
                 }
             }
 
+            // Sizing
             if let Some(size) = self.props.get("size") {
-                let parts: Vec<&str> = size.split_whitespace().collect();
+                let parts: Vec<&str> = size.trim_matches('"').split_whitespace().collect();
                 if parts.len() >= 2 {
                     let w = parts[0].parse::<f64>().unwrap_or(0.0) * 100.0;
                     let h = parts[1].parse::<f64>().unwrap_or(0.0) * 100.0;
@@ -149,19 +213,26 @@ Dir.chdir("Bolma") do
                 }
             }
 
-            let bg_color = self
-                .props
-                .get("background")
-                .or_else(|| self.props.get("bg"))
-                .or_else(|| self.props.get("color"));
+            // Stroke (Borders)
+            if let Some(stroke_color) = self.props.get("stroke") {
+                let color = Self::resolve_color(stroke_color);
+                let width = self
+                    .props
+                    .get("stroke-width")
+                    .map(|w| w.trim_matches('"'))
+                    .unwrap_or("1");
+                style.push_str(&format!("border: {}px solid {}; ", width, color));
+            }
 
-            if let Some(bg) = bg_color {
-                let clean = bg.trim_matches('"');
-                if norm == "text" {
-                    style.push_str(&format!("color: {}; ", clean));
-                } else {
-                    style.push_str(&format!("background-color: {}; ", clean));
-                }
+            // Colors: 'color' is strictly for text; 'background' / 'bg' is for container backgrounds
+            if let Some(text_color) = self.props.get("color") {
+                let color = Self::resolve_color(text_color);
+                style.push_str(&format!("color: {}; ", color));
+            }
+
+            if let Some(bg_color) = self.props.get("background").or_else(|| self.props.get("bg")) {
+                let color = Self::resolve_color(bg_color);
+                style.push_str(&format!("background-color: {}; ", color));
             }
 
             if let Some(radius) = self.props.get("border-radius") {
@@ -176,12 +247,14 @@ Dir.chdir("Bolma") do
             }
 
             let text_content = self.props.get("text").map(|t| t.trim_matches('"')).unwrap_or("");
+            let placeholder = self.props.get("placeholder").map(|t| t.trim_matches('"')).unwrap_or("Type here...");
 
             match norm.as_str() {
-                "vstack" => format!("<div style='display: flex; flex-direction: column; gap: 10px; {}'>{}</div>", style, inner_html),
-                "hstack" => format!("<div style='display: flex; flex-direction: row; gap: 10px; {}'>{}</div>", style, inner_html),
+                "vstack" => format!("<div style='display: flex; flex-direction: column; gap: 8px; {}'>{}</div>", style, inner_html),
+                "hstack" => format!("<div style='display: flex; flex-direction: row; gap: 8px; {}'>{}</div>", style, inner_html),
                 "zstack" => format!("<div style='position: relative; {}'>{}</div>", style, inner_html),
                 "text" => format!("<span style='{}'>{}</span>", style, text_content),
+                "textfield" => format!("<input type='text' placeholder='{}' style='padding: 8px 12px; border-radius: 6px; font-size: 14px; outline: none; {}' />", placeholder, style),
                 "button" => {
                     let action = self.props.get("action").or_else(|| self.props.get("onclick"))
                         .map(|a| format!("onclick=\"{}\"", a.trim_matches('"')))
@@ -191,11 +264,61 @@ Dir.chdir("Bolma") do
                 }
                 "circle" | "rectangle" | "unevenroundedrectangle" => {
                     let text_span = if !text_content.is_empty() { format!("<span>{}</span>", text_content) } else { String::new() };
-                    format!("<div style='display: flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; {}'>{}{}" , style, text_span, inner_html)
+                    format!("<div style='display: flex; align-items: center; justify-content: center; {}'>{}{}" , style, text_span, inner_html)
                 }
                 _ => format!("<div style='{}'>{}</div>", style, inner_html),
             }
         }
+    }
+
+    pub fn compile_and_run(filepath: &str) -> Result<(), String> {
+        let unparsed_file = fs::read_to_string(filepath)
+            .map_err(|_| format!("Could not read file target: {}", filepath))?;
+
+        let use_browser = unparsed_file.contains("import { BrowserWindow }")
+            || unparsed_file.contains("import {BrowserWindow}");
+
+        let file_pair = BolmaParser::parse(Rule::file, &unparsed_file)
+            .map_err(|e| format!("Syntax error in {}:\n{}", filepath, e))?
+            .next()
+            .unwrap();
+
+        let mut body_html = String::new();
+        let mut page_bg = String::from("transparent");
+
+        for pair in file_pair.into_inner() {
+            match pair.as_rule() {
+                Rule::prop => {
+                    let mut inner = pair.into_inner();
+                    let key = inner.next().unwrap().as_str();
+                    let val = inner.next().unwrap().as_str();
+                    if key == "background" || key == "bg" {
+                        page_bg = Element::resolve_color(val);
+                    }
+                }
+                Rule::element => {
+                    let elem = parse_element(pair);
+                    body_html.push_str(&elem.to_html());
+                }
+                _ => {}
+            }
+        }
+
+        let final_html = format!(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Bolma Layout</title><style>* {{ box-sizing: border-box; }} body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: {}; color: #111; margin: 0; padding: 20px; }}</style></head><body>{}</body></html>",
+            page_bg, body_html
+        );
+
+        let html_path = Path::new("layout.html");
+        fs::write(html_path, &final_html).map_err(|e| e.to_string())?;
+
+        let abs_path = fs::canonicalize(html_path)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        open_window(&abs_path, use_browser);
+        Ok(())
     }
 
     fn parse_element(pair: pest::iterators::Pair<Rule>) -> Element {
@@ -214,58 +337,6 @@ Dir.chdir("Bolma") do
             }
         }
         elem
-    }
-
-    pub fn compile_and_run(filepath: &str) -> Result<(), String> {
-        let unparsed_file = fs::read_to_string(filepath)
-            .map_err(|_| format!("Could not read file target: {}", filepath))?;
-
-        let start_time = std::time::Instant::now();
-
-        let use_browser = unparsed_file.contains("import { BrowserWindow }")
-            || unparsed_file.contains("import {BrowserWindow}");
-
-        let file_pair = BolmaParser::parse(Rule::file, &unparsed_file)
-            .map_err(|e| format!("Syntax error in {}:\n{}", filepath, e))?
-            .next()
-            .unwrap();
-
-        let mut body_html = String::new();
-        let mut page_bg = String::from("#ffffff");
-
-        for pair in file_pair.into_inner() {
-            match pair.as_rule() {
-                Rule::prop => {
-                    let mut inner = pair.into_inner();
-                    let key = inner.next().unwrap().as_str();
-                    let val = inner.next().unwrap().as_str();
-                    if key == "background" || key == "bg" {
-                        page_bg = val.trim_matches('"').to_string();
-                    }
-                }
-                Rule::element => {
-                    let elem = parse_element(pair);
-                    body_html.push_str(&elem.to_html());
-                }
-                _ => {}
-            }
-        }
-
-        let final_html = format!(
-            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Bolma Layout</title><style>body {{ font-family: Helvetica, sans-serif; background: {}; color: #111; margin: 40px; }}</style></head><body>{}</body></html>",
-            page_bg, body_html
-        );
-
-        let html_path = Path::new("layout.html");
-        fs::write(html_path, &final_html).map_err(|e| e.to_string())?;
-
-        let abs_path = fs::canonicalize(html_path)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-
-        open_window(&abs_path, use_browser);
-        Ok(())
     }
 
     fn open_window(html_path: &str, use_browser: bool) {
@@ -303,7 +374,7 @@ Dir.chdir("Bolma") do
 
     hex_color = @{ "#" ~ (ASCII_HEX_DIGIT{6} | ASCII_HEX_DIGIT{3}) }
     string    = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
-    number    = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+    number    = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? | "." ~ ASCII_DIGIT+ }
     ident     = @{ (ASCII_ALPHA | "_" | "-") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 
     value = { hex_color | string | number | ident }
@@ -319,17 +390,34 @@ Dir.chdir("Bolma") do
 
   layout_bolma_content = <<~'BOLMA'
     vstack {
-        background: "#f0f0f0"
+        justify: "center"
+        align: "center"
+        gap: "12"
+
         text {
             text: "Welcome to Bolma!"
-            color: "#333333"
-            size: "24 24"
+            color: "indigo"
+            size: "28 28"
         }
-        button {
-            text: "Click Me"
-            action: "alert('Hello from Bolma!')"
-            background: "#007acc"
-            color: "#ffffff"
+
+        textfield {
+            placeholder: "Enter something..."
+            stroke: "indigo"
+            stroke-width: "1"
+        }
+
+        hstack {
+            margin: "10 0"
+            button {
+                text: "Click Me"
+                background: "mint"
+                color: "white"
+            }
+            button {
+                text: "Cancel"
+                background: "pink"
+                color: "white"
+            }
         }
     }
   BOLMA
@@ -339,4 +427,3 @@ Dir.chdir("Bolma") do
   run_with_progress("Bolma v0.1.0 release", "cargo build --release")
   FileUtils.cp("target/release/bolma", "./Bolma")
 end
-
