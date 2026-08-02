@@ -139,7 +139,6 @@ class ViewNode {
             })(),
 
             'textfield' => (function() use ($style, $idAttr, $bindAttrs, $initialState) {
-                // Extract properties from inline args or block properties
                 $bind = $this->args['text'] ?? $this->args[0] ?? '';
                 $key = preg_replace('/^@Var\./', '', $bind);
                 $placeholder = htmlspecialchars($this->args['placeholder'] ?? 'Type here...');
@@ -190,7 +189,6 @@ class BolmaCompiler {
             $line = trim(preg_replace('#//.*$#', '', $lines[$i]));
             if (empty($line)) continue;
 
-            // Global and local variable parser
             if (preg_match('/^@Var\s+(global\s+)?([a-zA-Z0-9_]+)\s*=\s*(.*)$/', $line, $m)) {
                 $isGlobal = !empty($m[1]);
                 $varName = $m[2];
@@ -204,18 +202,13 @@ class BolmaCompiler {
                 continue;
             }
 
-            if ($line === '{') {
-                continue;
-            }
-
-            if ($line === '}') {
-                if (count($stack) > 1) {
+            if ($line === '{' || $line === '}') {
+                if ($line === '}' && count($stack) > 1) {
                     array_pop($stack);
                 }
                 continue;
             }
 
-            // Parse block properties (e.g. text(@Var.userColor) or placeholder(...))
             $currNode = end($stack);
             if ($currNode && strtolower($currNode->type) === 'textfield' && preg_match('/^([a-zA-Z0-9_]+)\((.*)\)$/', $line, $propMatch)) {
                 $propName = $propMatch[1];
@@ -224,15 +217,7 @@ class BolmaCompiler {
                 continue;
             }
 
-            if (preg_match('/^@([a-zA-Z]+)(?:\((.*?)\))?\s*\{?$/', $line, $m)) {
-                $node = new ViewNode();
-                $node->type = $m[1];
-                if (!empty($m[2])) {
-                    $node->args = self::parseNamedArgs($m[2]);
-                }
-                end($stack)->children[] = $node;
-                $stack[] = $node;
-            } elseif (preg_match('/^([a-zA-Z]+)(?:\((.*?)\))?\s*\{$/', $line, $m)) {
+            if (preg_match('/^@([a-zA-Z]+)(?:\((.*?)\))?\s*\{?$/', $line, $m) || preg_match('/^([a-zA-Z]+)(?:\((.*?)\))?\s*\{$/', $line, $m)) {
                 $node = new ViewNode();
                 $node->type = $m[1];
                 if (!empty($m[2])) {
@@ -258,7 +243,6 @@ class BolmaCompiler {
                     }
                 }
                 end($stack)->children[] = $node;
-                
                 if (isset($lines[$i + 1]) && trim($lines[$i + 1]) === '{') {
                     $stack[] = $node;
                 }
@@ -307,11 +291,34 @@ class BolmaCompiler {
         return $args;
     }
 
-    public static function launchAppKitWindow(string $htmlContent): void {
+    public static function launchNativeWindow(string $htmlContent): void {
         $htmlFile = __DIR__ . '/layout.html';
         file_put_contents($htmlFile, $htmlContent);
+        $absPath = realpath($htmlFile);
 
-        $swiftAppCode = <<<'SWIFT'
+        if (PHP_OS_FAMILY === 'Windows') {
+            // Windows Native Engine: PowerShell + WebBrowser/WebView2
+            $psCode = <<<PS
+Add-Type -AssemblyName System.Windows.Forms
+\$form = New-Object System.Windows.Forms.Form
+\$form.Text = "Bolma Windows Native"
+\$form.Width = 750
+\$form.Height = 650
+\$form.StartPosition = "CenterScreen"
+
+\$browser = New-Object System.Windows.Forms.WebBrowser
+\$browser.Dock = "Fill"
+\$browser.Url = [System.Uri]"file:///{$absPath}"
+
+\$form.Controls.Add(\$browser)
+[void]\$form.ShowDialog()
+PS;
+            $psFile = __DIR__ . '/win_runner.ps1';
+            file_put_contents($psFile, $psCode);
+            passthru("powershell -ExecutionPolicy Bypass -File " . escapeshellarg($psFile));
+        } else {
+            // macOS Native Engine: Swift AppKit
+            $swiftAppCode = <<<'SWIFT'
 import AppKit
 import WebKit
 
@@ -321,20 +328,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rect = NSRect(x: 0, y: 0, width: 700, height: 600)
-        window = NSWindow(
-            contentRect: rect,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
+        window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.center()
-        window.title = "Bolma"
+        window.title = "Bolma AppKit Native"
         
         let config = WKWebViewConfiguration()
         webView = WKWebView(frame: rect, configuration: config)
-        
-        let htmlPath = FileManager.default.currentDirectoryPath + "/layout.html"
-        let fileUrl = URL(fileURLWithPath: htmlPath)
+        let fileUrl = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/layout.html")
         webView.loadFileURL(fileUrl, allowingReadAccessTo: fileUrl.deletingLastPathComponent())
         
         window.contentView = webView
@@ -342,9 +342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
-    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { return true }
 }
 
 let app = NSApplication.shared
@@ -352,9 +350,9 @@ let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
 SWIFT;
-
-        file_put_contents(__DIR__ . '/appkit_runner.swift', $swiftAppCode);
-        passthru("swift " . escapeshellarg(__DIR__ . '/appkit_runner.swift'));
+            file_put_contents(__DIR__ . '/appkit_runner.swift', $swiftAppCode);
+            passthru("swift " . escapeshellarg(__DIR__ . '/appkit_runner.swift'));
+        }
     }
 
     public static function compileAndRun(string $filepath): void {
@@ -377,35 +375,19 @@ SWIFT;
 
         $reactiveEngineJs = <<<HTML
         <script>
-            function bolmaHide(id) {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'none';
-            }
-            function bolmaShow(id) {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'flex';
-            }
+            function bolmaHide(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+            function bolmaShow(id) { const el = document.getElementById(id); if (el) el.style.display = 'flex'; }
             function bolmaDelay(id, time = 1000) {
                 setTimeout(() => {
                     const el = document.getElementById(id);
-                    if (el) {
-                        const current = window.getComputedStyle(el).display;
-                        el.style.display = (current === 'none') ? 'flex' : 'none';
-                    }
+                    if (el) { el.style.display = (window.getComputedStyle(el).display === 'none') ? 'flex' : 'none'; }
                 }, time);
             }
 
             class BolmaStateStore {
-                constructor(initial) {
-                    this.state = initial || {};
-                }
-                get(key) {
-                    return this.state[key];
-                }
-                set(key, val) {
-                    this.state[key] = val;
-                    this.render();
-                }
+                constructor(initial) { this.state = initial || {}; }
+                get(key) { return this.state[key]; }
+                set(key, val) { this.state[key] = val; this.render(); }
                 resolveColor(col) {
                     if (!col) return '';
                     if (col.startsWith('#')) return col;
@@ -436,20 +418,18 @@ SWIFT;
         </script>
 HTML;
 
-        $html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Bolma AppKit</title>"
-            . "<style>* { box-sizing: border-box; } body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; background: #F2F2F7; padding: 40px; display: flex; align-items: center; justify-content: center; }</style>"
+        $html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Bolma App</title>"
+            . "<style>* { box-sizing: border-box; } body { font-family: 'Segoe UI', -apple-system, sans-serif; background: #F2F2F7; padding: 40px; display: flex; align-items: center; justify-content: center; }</style>"
             . "</head><body>{$bodyHtml}{$reactiveEngineJs}</body></html>";
 
-        self::launchAppKitWindow($html);
+        self::launchNativeWindow($html);
     }
 }
 
 $args = array_slice($argv, 1);
 $target = $args[0] ?? null;
 
-if ($target === 'run') {
-    $target = $args[1] ?? null;
-}
+if ($target === 'run') { $target = $args[1] ?? null; }
 
 if (!$target || in_array($target, ['--help', '-h'])) {
     echo "Bolma CLI\nUsage: bolma [run] <file.bolma>\n";
