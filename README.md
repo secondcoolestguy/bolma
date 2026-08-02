@@ -4,5 +4,5 @@
 
 homebrew:
 ```homebrew
-    brew install Bolma
+brew install Bolma
 ```
